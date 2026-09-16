@@ -1378,6 +1378,11 @@ function cmdSkills(args){
 }
 
 async function cmdUse(args){
+  if(!args){
+    S.messages.push({role:'assistant',content:'Usage: `/use <skill-name>` — forces the agent to consult that skill before its next response.'});
+    renderMessages();
+    return;
+  }
   let resolve;
   const pending = {sessionId:S.session&&S.session.session_id||null,promise:null};
   pending.promise = new Promise(r => { resolve = r; });
@@ -1388,11 +1393,6 @@ async function cmdUse(args){
       await newSession();
       pending.sessionId=S.session&&S.session.session_id||null;
       if(typeof renderSessionList==='function') await renderSessionList();
-    }
-    if(!args){
-      S.messages.push({role:'assistant',content:'Usage: `/use <skill-name>` — forces the agent to consult that skill before its next response.'});
-      renderMessages();
-      return;
     }
     const data = await api('/api/skills');
     const skills = data.skills || [];
