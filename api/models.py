@@ -1873,6 +1873,10 @@ class Session:
         self.process_wakeup_pause = process_wakeup_pause if isinstance(process_wakeup_pause, dict) else {}
         self.share_token = str(share_token).strip() if share_token else None
         self.share_created_at = share_created_at
+        self.skill_provenance_generation = max(
+            0,
+            _parse_nonnegative_int(kwargs.get('skill_provenance_generation')) or 0,
+        )
         self.gateway_run = gateway_run if isinstance(gateway_run, dict) else None
         # Gateway delegation rows leased for this session's next accepted turn (api.gateway_delegation_wakeup).
         self.delegation_reservation = delegation_reservation if isinstance(delegation_reservation, dict) else None
@@ -1982,6 +1986,7 @@ class Session:
             'share_token', 'share_created_at',
             'gateway_run', 'delegation_reservation', 'delegation_cutoff_ts',
             'skill_provenance',
+            'skill_provenance_generation',
         ]
         guarded_messages, exact_replay_rows_removed = _deduplicate_exact_stable_messages(self.messages)
         if exact_replay_rows_removed:
@@ -2604,6 +2609,7 @@ class Session:
 
     def clear_skill_usage(self) -> None:
         self.skill_provenance = {}
+        self.skill_provenance_generation += 1
 
 
 PROCESS_WAKEUP_PROVIDER_UNAVAILABLE_TYPES = frozenset({
