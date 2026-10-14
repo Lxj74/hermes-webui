@@ -16808,7 +16808,21 @@ def _run_agent_streaming(
                                 _heal_projected_history = _agent_replay_settle_projection(
                                     _heal_kwargs.get("conversation_history") or []
                                 )
-                                _heal_result = agent.run_conversation(**_heal_kwargs)
+                                # Skill completion callbacks persist through this same lock.
+                                _agent_lock.release()
+                                try:
+                                    _heal_result = agent.run_conversation(**_heal_kwargs)
+                                finally:
+                                    _agent_lock.acquire()
+                                if cancel_event.is_set():
+                                    return
+                                if not _stream_writeback_is_current(s, stream_id):
+                                    logger.info(
+                                        "Skipping stale credential self-heal result for session %s stream %s",
+                                        getattr(s, 'session_id', session_id),
+                                        stream_id,
+                                    )
+                                    return
                                 _remember_pending_steer_result(_heal_result)
                                 _active_turn_identity = _resolve_active_turn_authority(
                                     _active_turn_identity,
