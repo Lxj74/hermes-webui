@@ -387,7 +387,6 @@ before the session's named-profile Gateway ownership is known.
 - **Todos** -- live task list from the current session; hidden while the in-chat task list toggle is on, which also disables the workspace-panel Todos tab
 - **Insights** -- token, cost, and skill-usage analytics; period presets (7/30/90/365 days) plus a **Custom range** with start/end date pickers
 - **Artifacts** -- files changed in the session and Skills Used, with a separate skill count and per-skill use counts
-- **Todos** -- live task list from the current session
 - **Spaces** -- add, rename, remove workspaces; quick-switch from topbar
 
 ### Mobile responsive
