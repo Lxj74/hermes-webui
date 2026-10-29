@@ -489,6 +489,7 @@ const LOCALES = {
     workspace_close_preview: 'Close preview',
     workspace_files_tab: 'Files',
     workspace_artifacts_tab: 'Artifacts',
+    workspace_artifact_files_changed: 'Files changed',
     workspace_artifact_source_session: 'session',
     workspace_hidden_files_visible: 'hidden visible',
     workspace_hidden_files_visible_title: 'Hidden files are visible — click for options',

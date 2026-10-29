@@ -234,7 +234,7 @@ def test_artifacts_open_refreshes_owner_and_rejects_stale_response():
     assert result == {"S": {"session": {"session_id": "B", "skill_provenance": {"B": 2}}}, "rendered": 0}
 
 
-def test_skills_used_disclosure_renders_counts_at_supported_widths():
+def test_skills_used_disclosure_renders_counts_at_supported_widths(tmp_path):
     workspace = (ROOT / "static" / "workspace.js").read_text(encoding="utf-8")
     usage = _extract_function(workspace, "_sessionSkillUsage")
     renderer = _extract_function(workspace, "renderSessionArtifacts")
@@ -245,7 +245,7 @@ def test_skills_used_disclosure_renders_counts_at_supported_widths():
                 "const $=id=>id==='workspaceArtifacts'?root:id==='workspaceArtifactsCount'?count:null;",
                 "const S={session:{session_id:'owner',workspace:'' ,skill_provenance:{'zeta <script>':2,'alpha':4}},messages:[],toolCalls:[]};",
                 "const collectSessionArtifacts=()=>[];",
-                "const t=key=>key==='insights_skill_usage_skills_used'?'Skills Used':'Uses';",
+                "const t=key=>key==='insights_skill_usage_skills_used'?'Skills Used':key==='workspace_artifact_files_changed'?'Files changed':'Uses';",
                 "const esc=value=>String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');",
                 usage,
                 renderer,
@@ -283,8 +283,8 @@ def test_skills_used_disclosure_renders_counts_at_supported_widths():
         <script>
           const S={{session:{{session_id:'owner',workspace:'',skill_provenance:{{'zeta <script>':2,'alpha-with-a-long-skill-name-that-must-wrap':4}}}},messages:[],toolCalls:[]}};
           const $=id=>document.getElementById(id);
-          const collectSessionArtifacts=()=>[];
-          const t=key=>key==='insights_skill_usage_skills_used'?'Skills Used':'Uses';
+          let artifactItems=[]; const collectSessionArtifacts=()=>artifactItems;
+          const t=key=>key==='insights_skill_usage_skills_used'?'Skills Used':key==='workspace_artifact_files_changed'?'Files changed':'Uses';
           const esc=value=>String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#39;');
           const openArtifactPath=()=>{{}};
           {usage}
@@ -295,17 +295,22 @@ def test_skills_used_disclosure_renders_counts_at_supported_widths():
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
         try:
-            page = browser.new_page(viewport={"width": 1024, "height": 600}, device_scale_factor=1)
+            coarse_context = browser.new_context(
+                viewport={"width": 1024, "height": 600},
+                device_scale_factor=1,
+                has_touch=True,
+            )
+            page = coarse_context.new_page()
             page.set_content(harness)
-            for width in (1024, 480):
+            for width in (1024, 820, 480):
                 page.set_viewport_size({"width": width, "height": 320})
                 assert page.locator(".workspace-artifact-skill-row").count() == 2
                 assert page.locator(".workspace-artifact-skill-name").first.inner_text() == "alpha-with-a-long-skill-name-that-must-wrap"
                 uses = page.locator(".workspace-artifact-skill-uses").first
                 assert uses.evaluate("element => getComputedStyle(element).whiteSpace") == "nowrap"
                 summary = page.locator(".workspace-artifact-skills>summary")
-                if width < 640:
-                    assert summary.bounding_box()["height"] >= 44
+                assert page.evaluate("matchMedia('(pointer: coarse)').matches")
+                assert summary.bounding_box()["height"] >= 44
                 disclosure = page.locator("details.workspace-artifact-skills")
                 disclosure.locator("summary").click()
                 assert disclosure.evaluate("element => !element.open")
@@ -314,7 +319,76 @@ def test_skills_used_disclosure_renders_counts_at_supported_widths():
                 disclosure.locator("summary").click()
                 assert disclosure.evaluate("element => element.open")
                 assert_layout_sane(page, "#workspaceArtifacts", checks=["overlap", "clip", "container-escape", "raw-string"])
-                page.screenshot(path=str(ROOT.parent / ".claude" / "pr-sweep" / "runs" / "webui-6593-2-respec" / f"skills-used-{width}.png"))
+                page.screenshot(path=str(tmp_path / f"skills-used-{width}.png"))
+
+        finally:
+            browser.close()
+
+
+def test_artifacts_count_labels_file_and_skill_groups():
+    workspace = (ROOT / "static" / "workspace.js").read_text(encoding="utf-8")
+    usage = _extract_function(workspace, "_sessionSkillUsage")
+    renderer = _extract_function(workspace, "renderSessionArtifacts")
+    output = _run_node(
+        "\n".join(
+            [
+                "const root={innerHTML:'',querySelector(){return null;}}; const count={textContent:''};",
+                "const $=id=>id==='workspaceArtifacts'?root:id==='workspaceArtifactsCount'?count:null;",
+                "const S={session:{session_id:'owner',workspace:'',skill_provenance:{alpha:3,beta:1}},messages:[],toolCalls:[]};",
+                "const collectSessionArtifacts=()=>[{path:'src/app.py'},{path:'README.md'}];",
+                "const t=key=>key==='insights_skill_usage_skills_used'?'Skills used':key==='workspace_artifact_files_changed'?'Files changed':'Uses';",
+                "const esc=value=>String(value);",
+                usage,
+                renderer,
+                "renderSessionArtifacts(); console.log(JSON.stringify({html:root.innerHTML,count:count.textContent}));",
+            ]
+        )
+    )
+    result = json.loads(output)
+    assert result["count"] == "4"
+    assert "Files changed" in result["html"]
+    assert '<span class="workspace-artifact-file-count">2</span>' in result["html"]
+    assert "Skills used" in result["html"]
+    assert '<span class="workspace-artifact-skill-count">2</span>' in result["html"]
+    assert "src/app.py" in result["html"] and "README.md" in result["html"]
+
+
+def test_skills_only_disclosure_has_no_file_separator():
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        pytest.skip("playwright is not installed")
+    workspace = (ROOT / "static" / "workspace.js").read_text(encoding="utf-8")
+    usage = _extract_function(workspace, "_sessionSkillUsage")
+    renderer = _extract_function(workspace, "renderSessionArtifacts")
+    css = "\n".join(
+        line for line in (ROOT / "static" / "style.css").read_text(encoding="utf-8").splitlines()
+        if "workspace-artifact" in line
+    )
+    harness = f"""
+      <style>:root {{ --border:#444; --muted:#999; --text:#111; }} {css}</style>
+      <div id="workspaceArtifacts"></div><span id="workspaceArtifactsCount"></span>
+      <script>
+        const S={{session:{{session_id:'owner',workspace:'',skill_provenance:{{review:1}}}},messages:[],toolCalls:[]}};
+        const $=id=>document.getElementById(id);
+        const collectSessionArtifacts=()=>[];
+        const t=key=>key==='insights_skill_usage_skills_used'?'Skills used':'Uses';
+        const esc=value=>String(value);
+        {usage}
+        {renderer}
+        renderSessionArtifacts();
+      </script>
+    """
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+        try:
+            page = browser.new_page(viewport={"width": 390, "height": 700})
+            page.set_content(harness)
+            section = page.locator("details.workspace-artifact-skills")
+            styles = section.evaluate(
+                "element => { const style=getComputedStyle(element); return {margin:style.marginTop,border:style.borderTopWidth,padding:style.paddingTop}; }"
+            )
+            assert styles == {"margin": "0px", "border": "0px", "padding": "0px"}
         finally:
             browser.close()
 
@@ -347,6 +421,8 @@ def test_artifacts_empty_and_files_only_states_remain_usable():
 
 def test_active_stream_conflict_keeps_resolved_use_payload():
     messages = (ROOT / "static" / "messages.js").read_text(encoding="utf-8")
+    normalize_goal_continuation_id = _extract_function(messages, "_normalizeGoalContinuationId")
+    take_restored_goal_continuation_id = _extract_function(messages, "_takeRestoredDraftGoalContinuationId")
     send_start = messages.index("async function send(){")
     send_end = messages.index("\nasync function startRegeneration", send_start)
     send = messages[send_start:send_end]
@@ -354,6 +430,8 @@ def test_active_stream_conflict_keeps_resolved_use_payload():
         """
         const assert = require('assert');
         const _recoverCompressedSend = async () => false;
+        %(normalize_goal_continuation_id)s
+        %(take_restored_goal_continuation_id)s
         const input = {value:'hello'};
         const queued = [];
         const S = {
@@ -436,7 +514,11 @@ def test_active_stream_conflict_keeps_resolved_use_payload():
           assert.strictEqual(_forcedSkillDirectivePending,null);
         })().catch(error=>{console.error(error);process.exit(1);});
         """
-    ) % {"send": send}
+    ) % {
+        "normalize_goal_continuation_id": normalize_goal_continuation_id,
+        "take_restored_goal_continuation_id": take_restored_goal_continuation_id,
+        "send": send,
+    }
     _run_node(script)
 
 

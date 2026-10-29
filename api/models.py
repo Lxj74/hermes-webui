@@ -1674,6 +1674,8 @@ def _validated_webui_pending_user_timestamp_identity(session, value):
     ):
         return None
     return (stream_id, pending_timestamp)
+
+
 def _normalize_skill_provenance(value) -> dict[str, int]:
     """Keep only the persisted skill-name to positive-count mapping shape."""
     if not isinstance(value, Mapping):

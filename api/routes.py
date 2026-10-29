@@ -951,6 +951,7 @@ def _record_session_skill_usage(
             return False
     return True
 
+
 def _retag_empty_session_profile(session, requested_profile):
     """Atomically retag an empty, unpinned placeholder with pin admission."""
     # Warm the canonical root-alias cache before LOCK, then use its snapshot

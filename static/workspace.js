@@ -620,7 +620,9 @@ function renderSessionArtifacts(){
   const items = collectSessionArtifacts();
   const skills = typeof _sessionSkillUsage==='function' ? _sessionSkillUsage() : [];
   const ownerId=String(S.session&&S.session.session_id||'');
+  const currentFilesDisclosure=root.querySelector&&root.querySelector('details.workspace-artifact-files');
   const currentDisclosure=root.querySelector&&root.querySelector('details.workspace-artifact-skills');
+  const filesOpen=!currentFilesDisclosure||currentFilesDisclosure.dataset.sessionId!==ownerId||currentFilesDisclosure.open;
   const skillsOpen=!currentDisclosure||currentDisclosure.dataset.sessionId!==ownerId||currentDisclosure.open;
   if(count) count.textContent = String(items.length + skills.length);
   if(!S.session){
@@ -659,10 +661,13 @@ function renderSessionArtifacts(){
     const sourceAttrs = item.source ? '' : ' data-i18n="workspace_artifact_source_session"';
     return `<button type="button" class="workspace-artifact-item" title="${esc(path)}" data-artifact-path="${esc(item.path)}" onclick="openArtifactPath(this.dataset.artifactPath)"><div class="workspace-artifact-filename">${esc(parts.name)}</div>${directory}<div class="workspace-artifact-meta"${sourceAttrs}>${source}</div></button>`;
   }).join('');
-  const skillMarkup = skills.length
-    ? `<details class="workspace-artifact-skills" data-session-id="${esc(ownerId)}"${skillsOpen?' open':''}><summary>${esc(t('insights_skill_usage_skills_used') || 'Skills Used')}<span class="workspace-artifact-skill-count">${skills.length}</span></summary><div class="workspace-artifact-skill-list">${skills.map(skill => `<div class="workspace-artifact-skill-row"><span class="workspace-artifact-skill-name">${esc(skill.name)}</span><span class="workspace-artifact-skill-uses">${esc(t('insights_skill_usage_col_uses') || 'Uses')}: ${skill.count}</span></div>`).join('')}</div></details>`
+  const filesSectionMarkup = items.length
+    ? `<details class="workspace-artifact-files" data-session-id="${esc(ownerId)}"${filesOpen?' open':''}><summary>${esc(t('workspace_artifact_files_changed') || 'Files changed')}<span class="workspace-artifact-file-count">${items.length}</span></summary><div class="workspace-artifact-file-list">${fileMarkup}</div></details>`
     : '';
-  root.innerHTML = fileMarkup + skillMarkup;
+  const skillMarkup = skills.length
+    ? `<details class="workspace-artifact-skills${items.length?'':' workspace-artifact-skills-only'}" data-session-id="${esc(ownerId)}"${skillsOpen?' open':''}><summary>${esc(t('insights_skill_usage_skills_used') || 'Skills Used')}<span class="workspace-artifact-skill-count">${skills.length}</span></summary><div class="workspace-artifact-skill-list">${skills.map(skill => `<div class="workspace-artifact-skill-row"><span class="workspace-artifact-skill-name">${esc(skill.name)}</span><span class="workspace-artifact-skill-uses">${esc(t('insights_skill_usage_col_uses') || 'Uses')}: ${skill.count}</span></div>`).join('')}</div></details>`
+    : '';
+  root.innerHTML = filesSectionMarkup + skillMarkup;
 }
 
 function projectSessionArtifactsForOwner(sessionId){
