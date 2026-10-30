@@ -4748,7 +4748,13 @@ function _mergePendingSessionMessage(session,messages){
     if(ownedIdx>=0){
       if(misplacedIdx>=0){
         const [misplacedUser]=messages.splice(misplacedIdx,1);
-        messages.splice(ownedIdx,0,misplacedUser);
+        // Let the producer adopt the moved row (it fills in pending attachments
+        // and provenance the row lacks), then insert it display-only, as the
+        // windowed branch does: an unpersisted prompt placed in front of saved
+        // rows must not shift the saved-row indices edit/fork rely on.
+        if(typeof getPendingSessionMessage==='function') getPendingSessionMessage(session,[misplacedUser]);
+        messages.splice(ownedIdx,0,
+          typeof _markRecoveredPromptRow==='function'?_markRecoveredPromptRow(misplacedUser):misplacedUser);
         return true;
       }
       messages.splice(ownedIdx,0,
