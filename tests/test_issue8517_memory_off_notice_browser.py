@@ -280,3 +280,42 @@ def test_payload_json_shape_is_codes_only():
     """The fixtures above use the exact shape the server emits."""
     assert set(OFF_SHARED) == {"state", "reason", "scope"}
     assert json.dumps(OFF_SHARED).count("/") == 0
+
+
+# ── Fable r1 UX fixes ─────────────────────────────────────────────────────────
+
+_FADE = "()=>getComputedStyle($('composerWrap'),'::before').display"
+_NOTICE_VISIBILITY = "()=>getComputedStyle($('memoryOffNotice')).visibility"
+
+
+def test_composer_fade_never_covers_a_shown_notice(page, server):
+    """The composer's top gradient faded the notice's last line below WCAG AA (3.9:1)."""
+    assert page.evaluate(_FADE) != "none"
+    server.sessions["s1"] = _session("s1", status=OFF_SHARED)
+    _load(page, "s1")
+    assert page.evaluate(_FADE) == "none"
+    server.sessions["s2"] = _session("s2", status={"state": "ok"})
+    _load(page, "s2")
+    assert page.evaluate(_FADE) != "none"
+
+
+@pytest.mark.parametrize("card", ["queueCard", "approvalCard", "clarifyCard"])
+def test_an_open_composer_flyout_hides_the_notice_band(page, server, card):
+    """Flyouts rise over the notice's band; slivers peeked out on each side."""
+    server.sessions["s1"] = _session("s1", status=OFF_SHARED)
+    _load(page, "s1")
+    assert page.evaluate(_NOTICE_VISIBILITY) == "visible"
+    page.evaluate("(id)=>$(id).classList.add('visible')", card)
+    assert page.evaluate(_NOTICE_VISIBILITY) == "hidden"
+    page.evaluate("(id)=>$(id).classList.remove('visible')", card)
+    assert page.evaluate(_NOTICE_VISIBILITY) == "visible"
+
+
+def test_notice_matches_sibling_banners_and_uses_the_strong_focus_ring(page, server):
+    server.sessions["s1"] = _session("s1", status=OFF_SHARED)
+    _load(page, "s1")
+    style = page.evaluate("()=>{const s=getComputedStyle($('memoryOffNotice'));return [s.fontSize,s.marginTop];}")
+    assert style == ["13px", "10px"]
+    rule = page.evaluate("""()=>{for(const sh of document.styleSheets){let rs;try{rs=sh.cssRules}catch(e){continue}
+      for(const r of rs){if(r.selectorText==='.memory-off-notice-dismiss:focus-visible')return r.style.cssText}}return ''}""")
+    assert "--focus-ring-strong" in rule
