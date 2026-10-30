@@ -487,3 +487,54 @@ def test_get_session_carries_the_status_for_an_idle_reload(tmp_path, hc, homes, 
 def test_get_session_predicts_an_outdated_agent_without_a_cached_agent(tmp_path, legacy_hc, homes, root_is, scope, monkeypatch):
     _saved_session(tmp_path, monkeypatch, "legacy-s")
     assert _get_session_payload(monkeypatch, "legacy-s")["memory_status"] == OFF_OUTDATED
+
+
+# --- Opus r1 should-fix: never import the Agent runtime from a request thread before it is bound ---
+
+def _spy_import_module(monkeypatch, replacement=None):
+    import importlib
+    imported = []
+    real_import = importlib.import_module
+
+    def spy(name, *args, **kwargs):
+        imported.append(name)
+        if replacement is not None and name == "agent.memory_manager":
+            return replacement
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib, "import_module", spy)
+    return imported
+
+
+def test_claim_seam_probe_never_imports_the_agent_runtime_before_it_is_bound(monkeypatch):
+    """The first cache-miss GET /api/session after boot must not import agent.memory_manager
+    (measured 72 ms and 84 modules, including the tools registry singleton) on a request thread."""
+    from api import memory_profile_scope as mps
+    monkeypatch.delitem(sys.modules, "agent.memory_manager", raising=False)
+    monkeypatch.delitem(sys.modules, "run_agent", raising=False)
+    imported = _spy_import_module(monkeypatch)
+    assert mps._claim_seam_available() is None
+    assert "agent.memory_manager" not in imported
+    assert "agent.memory_manager" not in sys.modules
+
+
+def test_claim_seam_probe_uses_an_already_imported_memory_manager(monkeypatch):
+    from api import memory_profile_scope as mps
+    monkeypatch.delitem(sys.modules, "run_agent", raising=False)
+    mm = types.ModuleType("agent.memory_manager")
+    mm.claim_instance = lambda *args, **kwargs: True
+    monkeypatch.setitem(sys.modules, "agent.memory_manager", mm)
+    imported = _spy_import_module(monkeypatch)
+    assert mps._claim_seam_available() is True
+    _agent_without_claim_seam(monkeypatch)
+    assert mps._claim_seam_available() is False
+    assert imported == []
+
+
+def test_claim_seam_probe_imports_once_the_agent_runtime_is_bound(monkeypatch):
+    from api import memory_profile_scope as mps
+    monkeypatch.delitem(sys.modules, "agent.memory_manager", raising=False)
+    monkeypatch.setitem(sys.modules, "run_agent", types.ModuleType("run_agent"))
+    imported = _spy_import_module(monkeypatch, replacement=types.ModuleType("agent.memory_manager"))
+    assert mps._claim_seam_available() is False
+    assert imported == ["agent.memory_manager"]

@@ -318,11 +318,20 @@ def memory_status_for_agent(agent: Any) -> Optional[dict]:
 
 
 def _claim_seam_available() -> Optional[bool]:
-    """Whether the Agent has ``agent.memory_manager.claim_instance`` (None: unknown)."""
-    try:
-        mm = sys.modules.get("agent.memory_manager") or importlib.import_module("agent.memory_manager")
-    except Exception:
-        return None
+    """Whether the Agent has ``agent.memory_manager.claim_instance`` (None: unknown).
+
+    Never imports the Agent runtime from a request thread before it is bound: the first
+    cache-miss GET /api/session after boot would otherwise pull in ~84 modules (including
+    the tools registry singleton). Until then the answer is unknown; the first turn reports
+    the real status."""
+    mm = sys.modules.get("agent.memory_manager")
+    if mm is None:
+        if "run_agent" not in sys.modules:
+            return None
+        try:
+            mm = importlib.import_module("agent.memory_manager")
+        except Exception:
+            return None
     return callable(getattr(mm, "claim_instance", None))
 
 
