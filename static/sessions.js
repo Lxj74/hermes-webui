@@ -4736,8 +4736,21 @@ function _mergePendingSessionMessage(session,messages){
   // turn's activity). Without a stamp the shape heuristics below still apply.
   const ownershipStart=Number(session&&session.pending_started_at)||0;
   if(ownershipStart>0&&typeof _currentTurnInsertIndex==='function'){
-    const ownedIdx=_currentTurnInsertIndex(messages,ownershipStart);
+    // A same-identity prompt row can already sit behind the live row (the
+    // malformed reconnect order #6419 repairs below). Judge ownership without
+    // it, then move that row (keeping its attachments and provenance) instead
+    // of inserting a second copy in front of it.
+    const misplacedIdx=liveAssistantIdx>=0?messages.findIndex((m,idx)=>
+      idx>liveAssistantIdx&&m&&m.role==='user'&&_sameTranscriptMessage(m,pendingMsg)
+    ):-1;
+    const withoutMisplaced=misplacedIdx>=0?messages.filter((_m,idx)=>idx!==misplacedIdx):messages;
+    const ownedIdx=_currentTurnInsertIndex(withoutMisplaced,ownershipStart);
     if(ownedIdx>=0){
+      if(misplacedIdx>=0){
+        const [misplacedUser]=messages.splice(misplacedIdx,1);
+        messages.splice(ownedIdx,0,misplacedUser);
+        return true;
+      }
       messages.splice(ownedIdx,0,
         typeof _markRecoveredPromptRow==='function'?_markRecoveredPromptRow(pendingMsg):pendingMsg);
       return true;

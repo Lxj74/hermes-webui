@@ -131,40 +131,7 @@ def test_merge_helper_repairs_malformed_order_and_is_idempotent():
     """A reconnect can already contain [live assistant, pending user]. The
     canonical helper must move that exact user row before the live boundary,
     preserve its metadata/attachments, and remain ordered on repeated probes."""
-    helpers = "\n".join(
-        [
-            _function_source(SESSIONS_JS, "_messageComparableText"),
-            _function_source(SESSIONS_JS, "_stripAttachedFilesMarker"),
-            _function_source(SESSIONS_JS, "_stripForcedSkillEnvelope"),
-            _function_source(SESSIONS_JS, "_normalizeUserTranscriptText"),
-            _function_source(SESSIONS_JS, "_sameTranscriptMessage"),
-            _function_source(SESSIONS_JS, "_currentTailUserMessage"),
-            _function_source(SESSIONS_JS, "_hasCurrentTailUserDuplicate"),
-            _function_source(SESSIONS_JS, "_mergePendingSessionMessage"),
-        ]
-    )
-    script = f"""
-{helpers}
-function getPendingSessionMessage(session, messages){{
-  const text=String(session.pending_user_message||'').trim();
-  if(!text) return null;
-  return {{role:'user',content:text,_pending:true,_ts:session.pending_started_at}};
-}}
-const historical={{role:'user',content:'same prompt',_ts:1}};
-const settled={{role:'assistant',content:'old answer',_ts:2}};
-const live={{role:'assistant',content:'working',_live:true,_ts:4}};
-const misplaced={{
-  role:'user',content:'same prompt',_pending:true,_ts:3,
-  attachments:[{{path:'proof.txt'}}],_source:'resume'
-}};
-const messages=[historical,settled,live,misplaced];
-const session={{pending_user_message:'same prompt',pending_started_at:3}};
-const first=_mergePendingSessionMessage(session,messages);
-const afterFirst=messages.map(m=>({{role:m.role,content:m.content,live:!!m._live,ts:m._ts,attachments:m.attachments,source:m._source}}));
-const second=_mergePendingSessionMessage(session,messages);
-process.stdout.write(JSON.stringify({{first,second,afterFirst,final:messages}}));
-"""
-    result = _run_node(script)
+    result = _run_node(_malformed_order_script())
 
     assert result["first"] is True
     assert result["second"] is False
@@ -178,6 +145,95 @@ process.stdout.write(JSON.stringify({{first,second,afterFirst,final:messages}}))
     assert repaired["ts"] == 3
     assert repaired["attachments"] == [{"path": "proof.txt"}]
     assert repaired["source"] == "resume"
+    assert sum(1 for row in result["final"] if row.get("_ts") == 3) == 1
+
+
+# The turn-ownership helpers the zero-offset branch of the merge uses (#8632). The repair test above must load them:
+# without them the merge's `typeof _currentTurnInsertIndex` guard sends every probe down the legacy path and the
+# ownership branch is never exercised.
+_OWNERSHIP_HELPERS = (
+    "_messageTimestampValue",
+    "_messageTurnOwnership",
+    "_isCompactionMarkerRow",
+    "_currentTurnInsertIndex",
+    "_markRecoveredPromptRow",
+)
+
+
+def _malformed_order_script(extra_rows: str = "", ownership: bool = True, adopting_producer: bool = False) -> str:
+    names = [
+        "_messageComparableText",
+        "_stripAttachedFilesMarker",
+        "_stripForcedSkillEnvelope",
+        "_normalizeUserTranscriptText",
+        "_sameTranscriptMessage",
+        "_currentTailUserMessage",
+        "_hasCurrentTailUserDuplicate",
+        "_mergePendingSessionMessage",
+    ]
+    if ownership:
+        names += list(_OWNERSHIP_HELPERS)
+    helpers = "\n".join(_function_source(SESSIONS_JS, name) for name in names)
+    epsilon = "const _RECOVERED_PROMPT_TS_EPSILON=0.001;" if ownership else ""
+    # The real producer (ui.js getPendingSessionMessage) adopts a current-turn user row that carries the turn's
+    # identity (here: the exact pending_started_at) instead of minting a new one; the plain stub never adopts.
+    adopt = (
+        "if((messages||[]).some(m=>m&&m.role==='user'&&m._ts===session.pending_started_at)) return null;"
+        if adopting_producer
+        else ""
+    )
+    return f"""
+{epsilon}
+{helpers}
+function getPendingSessionMessage(session, messages){{
+  const text=String(session.pending_user_message||'').trim();
+  if(!text) return null;
+  {adopt}
+  return {{role:'user',content:text,_pending:true,_ts:session.pending_started_at}};
+}}
+const historical={{role:'user',content:'same prompt',_ts:1}};
+const settled={{role:'assistant',content:'old answer',_ts:2}};
+const live={{role:'assistant',content:'working',_live:true,_ts:4}};
+const misplaced={{
+  role:'user',content:'same prompt',_pending:true,_ts:3,
+  attachments:[{{path:'proof.txt'}}],_source:'resume'
+}};
+const messages=[historical,settled{extra_rows},live,misplaced];
+const session={{pending_user_message:'same prompt',pending_started_at:3}};
+const first=_mergePendingSessionMessage(session,messages);
+const afterFirst=messages.map(m=>({{role:m.role,content:m.content,live:!!m._live,ts:m._ts,attachments:m.attachments,source:m._source,displayOnly:!!m._displayOnlyRow}}));
+const second=_mergePendingSessionMessage(session,messages);
+process.stdout.write(JSON.stringify({{first,second,afterFirst,final:messages}}));
+"""
+
+
+@pytest.mark.skipif(NODE is None, reason="node not on PATH")
+def test_ownership_branch_moves_a_misplaced_prompt_in_front_of_persisted_turn_rows():
+    """#8632 follow-up: with persisted current-turn rows before the live tail, the zero-offset ownership branch must
+    move the misplaced prompt row in front of them (one row, attachments and provenance kept), not insert a second
+    copy and leave the original behind the live row."""
+    result = _run_node(
+        _malformed_order_script(
+            ",{role:'tool',content:'ran tests',_ts:3.5},{role:'assistant',content:'narration',_ts:3.6}",
+            adopting_producer=True,
+        )
+    )
+
+    assert result["first"] is True
+    assert result["second"] is False
+    assert [(row["role"], row["content"]) for row in result["afterFirst"]] == [
+        ("user", "same prompt"),
+        ("assistant", "old answer"),
+        ("user", "same prompt"),
+        ("tool", "ran tests"),
+        ("assistant", "narration"),
+        ("assistant", "working"),
+    ]
+    moved = result["afterFirst"][2]
+    assert moved["ts"] == 3
+    assert moved["attachments"] == [{"path": "proof.txt"}]
+    assert moved["source"] == "resume"
+    assert moved["displayOnly"] is False
     assert sum(1 for row in result["final"] if row.get("_ts") == 3) == 1
 
 
