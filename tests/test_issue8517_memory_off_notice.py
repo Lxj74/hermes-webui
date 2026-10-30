@@ -144,8 +144,10 @@ def _assert_codes_only(payload, homes, allowed):
     blob = json.dumps(payload)
     for home in homes.values():
         assert str(home) not in blob, f"memory status leaks a path: {blob}"
+    # The test harness's session ids carry the profile name; nothing else may.
+    rest = json.dumps({k: v for k, v in payload.items() if k not in ("session_id", "stream_id")})
     for name in ("alpha", "beta"):
-        assert name not in blob, f"memory status leaks a profile name: {blob}"
+        assert name not in rest, f"memory status leaks a profile name: {rest}"
     assert set(payload) <= allowed, f"unexpected keys: {sorted(set(payload) - allowed)}"
 
 
