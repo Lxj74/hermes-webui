@@ -299,16 +299,20 @@ def test_composer_fade_never_covers_a_shown_notice(page, server):
     assert page.evaluate(_FADE) != "none"
 
 
+_NOTICE_DISPLAY = "()=>getComputedStyle($('memoryOffNotice')).display"
+
+
 @pytest.mark.parametrize("card", ["queueCard", "approvalCard", "clarifyCard"])
-def test_an_open_composer_flyout_hides_the_notice_band(page, server, card):
-    """Flyouts rise over the notice's band; slivers peeked out on each side."""
+def test_an_open_composer_flyout_collapses_the_notice(page, server, card):
+    """Fable r1/r2: flyouts rise over the notice; each already reserves its own space, so keeping the
+    notice's band (visibility:hidden) doubled the blank above every card. Collapse it instead."""
     server.sessions["s1"] = _session("s1", status=OFF_SHARED)
     _load(page, "s1")
-    assert page.evaluate(_NOTICE_VISIBILITY) == "visible"
+    assert page.evaluate(_NOTICE_DISPLAY) == "flex"
     page.evaluate("(id)=>$(id).classList.add('visible')", card)
-    assert page.evaluate(_NOTICE_VISIBILITY) == "hidden"
+    assert page.evaluate(_NOTICE_DISPLAY) == "none"
     page.evaluate("(id)=>$(id).classList.remove('visible')", card)
-    assert page.evaluate(_NOTICE_VISIBILITY) == "visible"
+    assert page.evaluate(_NOTICE_DISPLAY) == "flex"
 
 
 def test_notice_matches_sibling_banners_and_uses_the_strong_focus_ring(page, server):
@@ -319,3 +323,56 @@ def test_notice_matches_sibling_banners_and_uses_the_strong_focus_ring(page, ser
     rule = page.evaluate("""()=>{for(const sh of document.styleSheets){let rs;try{rs=sh.cssRules}catch(e){continue}
       for(const r of rs){if(r.selectorText==='.memory-off-notice-dismiss:focus-visible')return r.style.cssText}}return ''}""")
     assert "--focus-ring-strong" in rule
+
+
+# ── Fable r2: a notice appearing mid-turn keeps a bottom-pinned reader pinned ──────
+
+def _long_session(sid, status=None):
+    msgs = []
+    for i in range(30):
+        msgs.append({"role": "user", "content": f"Question {i}: " + "word " * 40, "timestamp": 100 + 2 * i})
+        msgs.append({"role": "assistant", "content": f"Answer {i}:\n\n" + "detail " * 80, "timestamp": 101 + 2 * i})
+    return _session(sid, status=status, messages=msgs, message_count=len(msgs))
+
+
+_BOTTOM = "()=>{const el=$('messages');return Math.round(el.scrollHeight-el.scrollTop-el.clientHeight);}"
+_SHOW_NOTICE = "()=>noteSessionMemoryStatus('s1',%s)" % json.dumps(OFF_SHARED)
+
+
+def _load_long_and_pin(page, server):
+    server.sessions["s1"] = _long_session("s1")
+    _load(page, "s1")
+    page.wait_for_timeout(300)  # let deferred rendering settle so it cannot re-pin for us
+    page.evaluate("()=>{const el=$('messages');el.scrollTop=el.scrollHeight;}")
+    page.wait_for_timeout(100)
+    assert page.evaluate("()=>{const el=$('messages');return el.scrollHeight>el.clientHeight+200;}")
+    assert page.evaluate(_BOTTOM) <= 1
+
+
+def test_notice_appearing_mid_turn_keeps_a_pinned_reader_at_the_bottom(page, server):
+    """Fable r2: the notice shrank the transcript viewport and stranded a pinned reader above the tail."""
+    _load_long_and_pin(page, server)
+    assert page.evaluate(_SHOW_NOTICE) is True
+    page.wait_for_timeout(100)
+    assert page.evaluate("()=>$('memoryOffNotice').hidden") is False
+    assert page.evaluate(_BOTTOM) <= 1
+
+
+def test_notice_appearing_never_yanks_a_reader_who_scrolled_away(page, server):
+    _load_long_and_pin(page, server)
+    page.evaluate("""()=>{_scrollPinned=false;_messageUserUnpinned=true;
+      const el=$('messages');el.scrollTop=Math.round(el.scrollHeight/3);}""")  # what a user scroll-away records
+    page.wait_for_timeout(100)
+    before = page.evaluate("()=>$('messages').scrollTop")
+    page.evaluate(_SHOW_NOTICE)
+    page.wait_for_timeout(100)
+    assert page.evaluate("()=>$('messages').scrollTop") == before
+
+
+def test_notice_appearing_respects_auto_scroll_follow_off(page, server):
+    _load_long_and_pin(page, server)
+    page.evaluate("()=>{window._autoScrollFollow=false;}")
+    before = page.evaluate("()=>$('messages').scrollTop")
+    page.evaluate(_SHOW_NOTICE)
+    page.wait_for_timeout(100)
+    assert page.evaluate("()=>$('messages').scrollTop") == before

@@ -2003,8 +2003,9 @@
   .memory-off-notice-dismiss:focus-visible{outline:2px solid var(--focus-ring-strong);outline-offset:2px;}
   /* #8517: the composer's top fade only ever covers the notice when the notice is shown */
   .memory-off-notice:not([hidden])+.composer-wrap::before{display:none;}
-  /* #8517: a composer flyout (queue, approval, clarify) rises over the notice's band */
-  .memory-off-notice:has(+ .composer-wrap :is(.queue-card,.approval-card,.clarify-card).visible){visibility:hidden;}
+  /* #8517: a composer flyout (queue, approval, clarify) rises over the notice and already reserves
+     its own space, so collapse the notice instead of keeping its band (a double blank above the card) */
+  .memory-off-notice:has(+ .composer-wrap :is(.queue-card,.approval-card,.clarify-card).visible){display:none;}
   @media(max-width:700px),(pointer:coarse){.memory-off-notice-dismiss{width:44px;height:44px;}.memory-off-notice{width:calc(100% - 24px);}}
   .agent-health-restart{flex-shrink:0;padding:6px 12px;border-radius:8px;border:1px solid color-mix(in srgb,var(--accent) 55%,var(--surface));background:color-mix(in srgb,var(--accent) 15%,var(--surface));color:var(--accent);font-size:12px;font-weight:600;cursor:pointer;transition:background-color .15s;}
   .agent-health-restart:hover{background:color-mix(in srgb,var(--accent) 25%,var(--surface));}

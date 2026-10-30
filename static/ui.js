@@ -13874,7 +13874,12 @@ function syncMemoryOffNotice(){
   const copy=t(MEMORY_OFF_NOTICE_KEYS[reason]);
   if(text.textContent!==copy) text.textContent=copy;
   notice.dataset.reason=reason;
+  const wasHidden=notice.hidden;
   notice.hidden=false;
+  // Appearing (often mid-turn) shrinks the transcript viewport by the notice's height; keep a
+  // reader pinned to the tail pinned, gated like the chat-todos tray (the helper itself no-ops
+  // for a reader who scrolled away).
+  if(wasHidden&&!(typeof window!=='undefined'&&window._autoScrollFollow===false)&&typeof _repinMessagesAfterComposerResize==='function') _repinMessagesAfterComposerResize();
   // A live region that was `hidden` is not reliably announced when it appears, so
   // say it once per profile and reason through the shared polite announcer as well.
   const announceKey=profile+':'+reason;
