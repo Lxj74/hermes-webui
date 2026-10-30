@@ -229,6 +229,7 @@ def test_background_compression_then_opening_the_continuation(page, server, term
     server.sessions["s2"] = _session("s2", status=OFF_SHARED)
     assert _load(page, "s2") == {"sid": "s2", "hidden": True, "reason": ""}, "the profile's dismissal applies"
     page.evaluate("(k)=>localStorage.removeItem(k)", f"{PREFIX}work:provider_shared_instance")
+    _load(page, "s3")
     assert _load(page, "s2") == {"sid": "s2", "hidden": False, "reason": "provider_shared_instance"}
 
 
