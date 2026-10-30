@@ -390,7 +390,11 @@ def test_runtime_paths_prefer_session_reasoning_effort():
     assert "getattr(_session_meta, 'reasoning_effort'" not in streaming
     assert "effective_session_reasoning_effort(\n                        _session_effort, _profile_home," in streaming
     assert "resolve_session_reasoning_effort(" in gateway
-    assert 'session_effort=getattr(s, "reasoning_effort", None)' in gateway
+    # The Gateway worker starts from the live session too, and resolves a legacy
+    # session through the same isolated session-profile read as the chip.
+    assert 'session_effort = getattr(s, "reasoning_effort", None)' in gateway
+    assert "session_effort = effective_session_reasoning_effort(" in gateway
+    assert "session_effort=session_effort," in gateway
 
 
 def test_reasoning_slash_command_posts_active_session_context():
@@ -1124,3 +1128,80 @@ def test_session_import_keeps_transcript_with_unknown_effort(imported, expected)
 
     assert handler.status == 200
     assert captured["reasoning_effort"] == expected
+
+
+# The effort has to reach the Gateway in the shape the Gateway decodes: it reads
+# model_options (structured ``reasoning``, or ``reasoning_effort`` inside it) and
+# ignores a top-level ``reasoning_effort``, which is still sent for older Gateways.
+def _gateway_reasoning_decoder():
+    """The installed Gateway's request decoder, or None where no Agent is importable."""
+    try:
+        from gateway.platforms.api_server_request_options import _request_reasoning_config
+        from gateway.platforms.api_server import _REASONING_EFFORTS  # noqa: F401 (the decoder imports it)
+    except Exception:
+        return None
+    return _request_reasoning_config
+
+
+@pytest.mark.parametrize("session_effort, expected", [
+    ("low", {"enabled": True, "effort": "low"}),
+    ("xhigh", {"enabled": True, "effort": "xhigh"}),
+    ("none", {"enabled": False}),
+])
+@pytest.mark.parametrize("runs_api", [False, True], ids=["legacy-api", "runs-api"])
+def test_gateway_receives_the_session_effort_where_it_reads_it(
+    isolated_reasoning_profiles, tmp_path, monkeypatch, runs_api, session_effort, expected
+):
+    session = Session(
+        session_id="gateway-effort-shape", profile="work", model="gpt-5",
+        model_provider="openai", workspace=str(tmp_path), reasoning_effort=session_effort,
+    )
+    captured, _ = _run_gateway_turn(
+        session, "gateway-effort-shape-stream", tmp_path, monkeypatch, runs_api=runs_api,
+    )
+    payload = captured[0][3]
+    assert payload["model_options"] == {"reasoning": expected}
+    assert payload["reasoning_effort"] == session_effort
+    decode = _gateway_reasoning_decoder()
+    if decode is not None:
+        assert decode(payload.get("model_options")) == expected
+
+
+@pytest.mark.parametrize("runs_api", [False, True], ids=["legacy-api", "runs-api"])
+def test_gateway_default_effort_leaves_the_gateway_to_its_profile_config(
+    isolated_reasoning_profiles, tmp_path, monkeypatch, runs_api
+):
+    # "Default" stores "": the Gateway has no "provider default" value, and
+    # {"enabled": true} alone means a medium effort on several providers.
+    session = Session(
+        session_id="gateway-effort-default", profile="work", model="gpt-5",
+        model_provider="openai", workspace=str(tmp_path), reasoning_effort="",
+    )
+    captured, _ = _run_gateway_turn(
+        session, "gateway-effort-default-stream", tmp_path, monkeypatch, runs_api=runs_api,
+    )
+    payload = captured[0][3]
+    assert "model_options" not in payload
+    assert "reasoning_effort" not in payload
+
+
+@pytest.mark.parametrize("runs_api", [False, True], ids=["legacy-api", "runs-api"])
+def test_gateway_legacy_named_profile_chat_sends_the_chips_effort(
+    isolated_reasoning_profiles, tmp_path, monkeypatch, runs_api
+):
+    # Root config low through HERMES_CONFIG_PATH, ``work`` high, ``work`` active:
+    # a legacy ``work`` chat shows high on the chip and must send high.
+    _root, work = isolated_reasoning_profiles
+    monkeypatch.setattr(profiles, "_active_profile", "work")
+    config.reload_config()
+    assert config.effective_session_reasoning_effort(None, str(work)) == "high"
+    session = Session(
+        session_id="gateway-legacy-named", profile="work", model="gpt-5",
+        model_provider="openai", workspace=str(tmp_path), reasoning_effort=None,
+    )
+    captured, _ = _run_gateway_turn(
+        session, "gateway-legacy-named-stream", tmp_path, monkeypatch, runs_api=runs_api,
+    )
+    payload = captured[0][3]
+    assert payload["reasoning_effort"] == "high"
+    assert payload["model_options"] == {"reasoning": {"enabled": True, "effort": "high"}}
