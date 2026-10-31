@@ -5,6 +5,8 @@
 
 ### Added
 
+- **A notice shows when memory is off for the agent serving the chat.** When memory can't be kept inside one profile, the Agent runs with memory (or just its external provider) switched off, and before this the only trace was a server log line. A dismissible notice above the composer now says which case applies (an Agent too old to scope memory per profile, an Agent that can't claim a provider per profile, or a provider already used by another profile) and how to turn memory back on. Healthy and read-only sessions show nothing. (#8652, refs #8517)
+
 - **Usage quotas for OpenCode Go and Command Code.** Settings > Providers shows their usage, limits and reset times on the quota card, read from each provider's usage API (sanitized to the card's existing window format), and reports a definitive failure, such as an invalid key, instead of the credential pool. Thanks @droopanu. (#7883)
 
 - **Opt-in Screen reader mode, enabled for the terminal.** A Settings toggle (also found by Settings search) makes the terminal readable by screen readers. Off by default. Thanks @grzezlo. (#8305)
@@ -74,6 +76,8 @@
 ### Fixed
 
 - **During an in-place update, static files are no longer cached for a year under the old version's URL.** The update swaps the checkout before the old process restarts, so for that window the old process served next-revision files under its own `?v=` version and marked them `immutable` for a year, which could leave a browser with a mixed front-end (for example a new control without its CSS). While an update or restart is in progress, static files now get the normal 5-minute cache, and the year-long cache returns if the update fails. Thanks @happy5318. (#8670, refs #6992)
+
+- **Internal (test reliability): the gateway routing footer test runs its node harness from a file.** It passed its whole script (about 128 KB, mostly the real `renderMessages()`) to node as one command-line argument, only about 2.5 KB under Linux's 128 KiB per-argument limit, so a routine change to `renderMessages()` would have made the file fail with "Argument list too long" instead of testing anything. The script now goes through a temporary file; the same code runs and no assertion changed. Thanks @happy5318. (#8659)
 
 - **Custom providers configured in the Agent's native `providers:` mapping show up in WebUI.** WebUI only read the legacy `custom_providers:` list, so a native-only setup had no provider cards, no model group and no live fallback. Native entries now appear in Settings > Providers and the model picker under their own route ID (renaming the label no longer changes it), and two routes that share one gateway URL keep their own key and context instead of borrowing each other's. Thanks @Jmars321. (#8448, closes #8428)
 
