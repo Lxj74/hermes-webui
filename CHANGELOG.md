@@ -77,6 +77,8 @@
 
 ### Fixed
 
+- **Your prompt stays at the top of its turn while a short session is still running.** When a young conversation loaded in one page (no older history to page in) while a reply was in progress, the turn's progress narration and tool rows could render above your own prompt. The prompt is now placed by the turn's server start time, the same rule longer conversations already used, so it sits in front of everything that turn produced and never above the previous turn's rows. (#8632, thanks @happy5318)
+
 - **CI cancels a pull request's run for a superseded head.** A new push to an open pull request now cancels that workflow's run for the previous head, queued or running, so a wave of refreshed pull requests no longer keeps every older head's runs in the queue ahead of later work. Pushes to master, tag pushes, manual dispatches and re-runs are never cancelled. CONTRIBUTING notes that open pull requests don't need to be kept up to date with master. (#8657, closes #8656)
 
 - **An Agent update waits for active Gateway runs again.** Since exp-v0.52.587 an unforced Agent update went ahead while a Gateway-routed chat was still running, changing the Agent checkout and cycling the Gateway under the run without the "Update anyway (interrupts N runs)" prompt. Agent updates now count every live run again, as v0.52.544 did; WebUI-only updates keep the #7293 exemption for runs that survive a WebUI restart. (#8662, fixes #8660)
