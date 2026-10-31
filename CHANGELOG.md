@@ -77,6 +77,8 @@
 
 ### Fixed
 
+- **CI cancels a pull request's run for a superseded head.** A new push to an open pull request now cancels that workflow's run for the previous head, queued or running, so a wave of refreshed pull requests no longer keeps every older head's runs in the queue ahead of later work. Pushes to master, tag pushes, manual dispatches and re-runs are never cancelled. CONTRIBUTING notes that open pull requests don't need to be kept up to date with master. (#8657, closes #8656)
+
 - **An Agent update waits for active Gateway runs again.** Since exp-v0.52.587 an unforced Agent update went ahead while a Gateway-routed chat was still running, changing the Agent checkout and cycling the Gateway under the run without the "Update anyway (interrupts N runs)" prompt. Agent updates now count every live run again, as v0.52.544 did; WebUI-only updates keep the #7293 exemption for runs that survive a WebUI restart. (#8662, fixes #8660)
 
 - Tests no longer leak provider state into the shared test environment: two onboarding tests applied a real setup on the test server, and the provider-key tests left API keys exported. With the real Agent installed, a local full-suite run failed `test_quiet_delegation_re_g2` and `test_ttl_cache` because of it. Tests only. (#8678, fixes #8677)
