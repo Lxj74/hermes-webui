@@ -5,6 +5,8 @@
 
 ### Added
 
+- **A notice shows when memory is off for the agent serving the chat.** When memory can't be kept inside one profile, the Agent runs with memory (or just its external provider) switched off, and before this the only trace was a server log line. A dismissible notice above the composer now says which case applies (an Agent too old to scope memory per profile, an Agent that can't claim a provider per profile, or a provider already used by another profile) and how to turn memory back on. Healthy and read-only sessions show nothing. (#8652, refs #8517)
+
 - **Usage quotas for OpenCode Go and Command Code.** Settings > Providers shows their usage, limits and reset times on the quota card, read from each provider's usage API (sanitized to the card's existing window format), and reports a definitive failure, such as an invalid key, instead of the credential pool. Thanks @droopanu. (#7883)
 
 - **Opt-in Screen reader mode, enabled for the terminal.** A Settings toggle (also found by Settings search) makes the terminal readable by screen readers. Off by default. Thanks @grzezlo. (#8305)
@@ -74,6 +76,8 @@
 ### Fixed
 
 - **Reasoning effort is remembered per chat (#2697).** The reasoning chip now restores each conversation's own effort: chat A on High and chat B on Low stay that way across switching and reload, while a pick still sets the profile default for new chats. Overlapping saves can no longer roll back an accepted pick, an unreadable session file fails closed instead of being treated as empty, CLI chats keep their source, and the effort now reaches a Hermes Gateway in the request options it reads (previously only the top-level key was sent, which the Gateway ignored). Salvage of #7881 by @Notaloop763, thanks for the original work. (#8253)
+
+- **Internal (test reliability): the gateway routing footer test runs its node harness from a file.** It passed its whole script (about 128 KB, mostly the real `renderMessages()`) to node as one command-line argument, only about 2.5 KB under Linux's 128 KiB per-argument limit, so a routine change to `renderMessages()` would have made the file fail with "Argument list too long" instead of testing anything. The script now goes through a temporary file; the same code runs and no assertion changed. Thanks @happy5318. (#8659)
 
 - **Custom providers configured in the Agent's native `providers:` mapping show up in WebUI.** WebUI only read the legacy `custom_providers:` list, so a native-only setup had no provider cards, no model group and no live fallback. Native entries now appear in Settings > Providers and the model picker under their own route ID (renaming the label no longer changes it), and two routes that share one gateway URL keep their own key and context instead of borrowing each other's. Thanks @Jmars321. (#8448, closes #8428)
 
