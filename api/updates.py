@@ -181,6 +181,7 @@ def _restart_blocker_snapshot() -> dict:
     (#7293): it runs inside the Hermes Gateway, survives a WebUI restart and is
     reattached afterwards. Legacy Gateway relays and Gateway launches still
     awaiting that handoff are counted (see run_drain.webui_owned_active_runs).
+    An update of the Agent adds those runs back (``_update_blocker_snapshot``).
     """
     from api import run_drain
 
@@ -203,6 +204,35 @@ def _active_stream_count() -> int:
     ``_restart_blocker_snapshot()`` so detached worker runs also block updates.
     """
     return int(_restart_blocker_snapshot().get('active_streams') or 0)
+
+
+def _update_blocker_snapshot(target: str) -> dict:
+    """Return the chat work that should block an update of ``target`` (#8660).
+
+    ``_restart_blocker_snapshot`` leaves out Gateway runs whose resumable run
+    identity is saved, because they survive a WebUI restart. An Agent update
+    also cycles the Gateway that executes them
+    (``_ensure_gateway_restart_for_agent_update``), which ends them, so for
+    ``target == 'agent'`` they block like any other run, as every active run
+    did before #7293. A WebUI-only update keeps the #7293 exemption.
+    """
+    snapshot = _restart_blocker_snapshot()
+    if target != 'agent':
+        return snapshot
+    from api import run_drain
+
+    extra = run_drain.resumable_gateway_active_runs()
+    if not extra:
+        return snapshot
+    merged = dict(snapshot)
+    extra_streams = [r['stream_id'] for r in extra if r.get('registered_stream')]
+    extra_runs = [r['stream_id'] for r in extra]
+    merged['active_streams'] = int(snapshot.get('active_streams') or 0) + len(extra_streams)
+    merged['active_runs'] = int(snapshot.get('active_runs') or 0) + len(extra_runs)
+    merged['blocking_stream_ids'] = (list(snapshot.get('blocking_stream_ids') or []) + extra_streams)[:10]
+    merged['blocking_run_ids'] = (list(snapshot.get('blocking_run_ids') or []) + extra_runs)[:10]
+    merged['restart_blocked'] = True
+    return merged
 
 
 def _restart_blocked_response(target: str, blocker_snapshot: dict | int) -> dict:
@@ -503,7 +533,7 @@ def _run_fenced_update(target: str, force_active_runs: bool, run) -> dict:
     """
     from api import run_drain
 
-    blocker_snapshot = _restart_blocker_snapshot()
+    blocker_snapshot = _update_blocker_snapshot(target)
     if blocker_snapshot.get('restart_blocked') and not force_active_runs:
         return _restart_blocked_response(target, blocker_snapshot)
 
@@ -512,7 +542,7 @@ def _run_fenced_update(target: str, force_active_runs: bool, run) -> dict:
     try:
         token = run_drain.hold_run_admission(f'update:{target}', force=bool(force_active_runs))
         try:
-            blocker_snapshot = _restart_blocker_snapshot()
+            blocker_snapshot = _update_blocker_snapshot(target)
             if blocker_snapshot.get('restart_blocked'):
                 if not force_active_runs:
                     return _restart_blocked_response(target, blocker_snapshot)
