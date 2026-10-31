@@ -288,6 +288,23 @@ def webui_owned_active_runs() -> list[dict]:
     block updates and are drained/settled like any WebUI run. The decision does
     not depend on the order in which a launch publishes its ownership markers.
     """
+    return _collect_active_runs(include_resumable_gateway=False)
+
+
+def all_active_runs() -> list[dict]:
+    """Return every live agent run, including resumable Gateway runs (#8660).
+
+    The same single pass as ``webui_owned_active_runs`` without its one
+    exclusion. An Agent update also cycles the Hermes Gateway, which ends the
+    resumable Gateway runs that survive a WebUI-only restart, so an Agent
+    update counts every run, as every update did before #7293. No durability
+    check is made, so a run whose durable mark is set or released mid-read is
+    still counted exactly once while its row or stream is registered.
+    """
+    return _collect_active_runs(include_resumable_gateway=True)
+
+
+def _collect_active_runs(*, include_resumable_gateway: bool) -> list[dict]:
     with _config.STREAMS_LOCK:
         stream_ids = [str(k) for k in _config.STREAMS.keys()]
         claimed = {str(k) for k in _config.PRE_ADMISSION_CLAIMS.keys()}
@@ -301,7 +318,7 @@ def webui_owned_active_runs() -> list[dict]:
     runs: list[dict] = []
     for sid, row in run_rows.items():
         backend = str(row.get("backend") or "") or "legacy"
-        if backend == "gateway" and _gateway_run_durably_resumable(sid):
+        if not include_resumable_gateway and backend == "gateway" and _gateway_run_durably_resumable(sid):
             continue
         runs.append({
             "stream_id": sid,
@@ -321,37 +338,6 @@ def webui_owned_active_runs() -> list[dict]:
             "phase": "launching" if sid in claimed else "registered",
             "launching": sid in claimed,
             "registered_stream": True,
-        })
-    return runs
-
-
-def resumable_gateway_active_runs() -> list[dict]:
-    """Return the live Gateway runs that ``webui_owned_active_runs`` leaves out.
-
-    These are Gateway runs whose resumable run identity is durably saved: they
-    keep running in the Gateway and survive a WebUI-only restart. An Agent
-    update cycles that Gateway too (``_ensure_gateway_restart_for_agent_update``),
-    which ends them, so the update path counts them for ``target == 'agent'``,
-    as every active run was counted before #7293 (#8660).
-    """
-    with _config.STREAMS_LOCK:
-        stream_ids = {str(k) for k in _config.STREAMS.keys()}
-    with _config.ACTIVE_RUNS_LOCK:
-        run_rows = {
-            str(k): (dict(v) if isinstance(v, dict) else {})
-            for k, v in _config.ACTIVE_RUNS.items()
-        }
-    runs: list[dict] = []
-    for sid, row in run_rows.items():
-        if str(row.get("backend") or "") != "gateway" or not _gateway_run_durably_resumable(sid):
-            continue
-        runs.append({
-            "stream_id": sid,
-            "session_id": row.get("session_id"),
-            "backend": "gateway",
-            "phase": row.get("phase") or "running",
-            "launching": False,
-            "registered_stream": sid in stream_ids,
         })
     return runs
 

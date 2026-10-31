@@ -144,17 +144,20 @@ def test_forced_agent_update_proceeds_with_resumable_gateway_runs(upd, monkeypat
     assert run_drain.run_admission_closed_response() is None
 
 
-def test_resumable_gateway_active_runs_is_exactly_what_webui_owned_runs_leaves_out():
+def test_all_active_runs_is_webui_owned_runs_plus_resumable_gateway_runs():
     _add_run("legacy-1", stream=True)
     _add_run("gw-pending", backend="gateway")  # no saved run identity yet: WebUI-owned
     _add_run("gw-durable", backend="gateway", durable_gateway=True, stream=True)
-    owned = {r["stream_id"] for r in run_drain.webui_owned_active_runs()}
-    resumable = run_drain.resumable_gateway_active_runs()
-    assert owned == {"legacy-1", "gw-pending"}
-    assert [r["stream_id"] for r in resumable] == ["gw-durable"]
-    assert resumable[0]["registered_stream"] is True
-    assert resumable[0]["backend"] == "gateway"
-    assert not owned & {r["stream_id"] for r in resumable}
+    with config.STREAMS_LOCK:
+        config.STREAMS["stream-only"] = object()  # a registered stream whose worker is still launching
+    owned = {r["stream_id"]: r for r in run_drain.webui_owned_active_runs()}
+    every = {r["stream_id"]: r for r in run_drain.all_active_runs()}
+    assert set(owned) == {"legacy-1", "gw-pending", "stream-only"}
+    assert set(every) == set(owned) | {"gw-durable"}
+    assert every["gw-durable"]["registered_stream"] is True
+    assert every["gw-durable"]["backend"] == "gateway"
+    for sid in owned:
+        assert every[sid] == owned[sid]
 
 
 def test_no_runs_means_no_agent_update_blocker(upd):
@@ -163,40 +166,50 @@ def test_no_runs_means_no_agent_update_blocker(upd):
     assert snap["active_runs"] == 0
 
 
-def _handoff_lands_between_reads(monkeypatch, stream_id):
-    """Mark ``stream_id`` durable right after the WebUI-owned read, before the resumable read."""
-    real = run_drain.webui_owned_active_runs
+def test_agent_snapshot_does_not_depend_on_the_durable_mark(upd, monkeypatch):
+    """One pass with no durability check: a mark that changes mid-read cannot drop or double a run.
 
-    def owned_then_handoff():
-        rows = real()
-        gateway_chat._mark_gateway_run_durable(stream_id)
-        return rows
+    Both round-1 gates reproduced a double count from two reads (handoff between them), and the round-2
+    senior gate a run in neither read (mark released before the row is unregistered). A single pass that
+    never asks whether a run is durable has neither window.
+    """
+    _add_run("gw-1", backend="gateway", durable_gateway=True, stream=True)
+    _add_run("legacy-1", stream=True)
 
-    monkeypatch.setattr(run_drain, "webui_owned_active_runs", owned_then_handoff)
+    def must_not_ask(sid):
+        pytest.fail("the Agent snapshot must not depend on whether a Gateway run is durable")
 
-
-def test_a_handoff_between_the_two_reads_counts_the_run_once(upd, monkeypatch):
-    """Both gates reproduced one live run counted twice when its durable mark landed between the reads."""
-    _add_run("gw-handoff", backend="gateway", stream=True)  # not durable yet: WebUI-owned
-    _handoff_lands_between_reads(monkeypatch, "gw-handoff")
+    monkeypatch.setattr(run_drain, "_gateway_run_durably_resumable", must_not_ask)
     snap = upd._update_blocker_snapshot("agent")
-    assert gateway_chat.gateway_run_durably_resumable("gw-handoff") is True
+    assert snap["active_runs"] == 2
+    assert sorted(snap["blocking_run_ids"]) == ["gw-1", "legacy-1"]
+
+
+@pytest.mark.parametrize("durable", [True, False], ids=["durable", "mark-released-before-unregister"])
+def test_a_gateway_run_counts_exactly_once_whatever_its_durable_mark(upd, durable):
+    """Worker teardown releases the durable mark before it unregisters the row; both states block once."""
+    _add_run("gw-teardown", backend="gateway", durable_gateway=durable, stream=True)
+    snap = upd._update_blocker_snapshot("agent")
     assert snap["active_runs"] == 1
     assert snap["active_streams"] == 1
-    assert snap["blocking_run_ids"] == ["gw-handoff"]
-    assert snap["blocking_stream_ids"] == ["gw-handoff"]
+    assert snap["blocking_run_ids"] == ["gw-teardown"]
+    assert snap["blocking_stream_ids"] == ["gw-teardown"]
     assert snap["restart_blocked"] is True
 
 
-def test_the_union_is_deduplicated_before_counting_and_truncating(upd, monkeypatch):
-    for i in range(11):
-        _add_run(f"legacy-{i:02d}", stream=True)
-    _add_run("gw-handoff", backend="gateway", stream=True)
-    _handoff_lands_between_reads(monkeypatch, "gw-handoff")
+def test_agent_snapshot_counts_every_run_and_truncates_ids_to_ten_unique(upd):
+    _add_run("gw-pending", backend="gateway", stream=True)
+    for i in range(3):
+        _add_run(f"legacy-{i}", stream=True)
+    for i in range(8):
+        _add_run(f"gw-durable-{i}", backend="gateway", durable_gateway=True, stream=True)
     snap = upd._update_blocker_snapshot("agent")
     assert snap["active_runs"] == 12
-    assert len(snap["blocking_run_ids"]) == 10
-    assert len(set(snap["blocking_run_ids"])) == 10
+    assert snap["active_streams"] == 12
+    for key in ("blocking_run_ids", "blocking_stream_ids"):
+        assert len(snap[key]) == 10, key
+        assert len(set(snap[key])) == 10, key
+        assert snap[key][0] == "gw-pending", key
 
 
 def test_webui_target_snapshot_is_the_restart_snapshot(upd):

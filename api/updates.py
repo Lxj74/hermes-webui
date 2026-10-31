@@ -193,7 +193,7 @@ def _restart_blocker_snapshot() -> dict:
     (#7293): it runs inside the Hermes Gateway, survives a WebUI restart and is
     reattached afterwards. Legacy Gateway relays and Gateway launches still
     awaiting that handoff are counted (see run_drain.webui_owned_active_runs).
-    An update of the Agent adds those runs back (``_update_blocker_snapshot``).
+    An update of the Agent counts those runs too (``_update_blocker_snapshot``).
     """
     from api import run_drain
 
@@ -216,26 +216,17 @@ def _update_blocker_snapshot(target: str) -> dict:
     identity is saved, because they survive a WebUI restart. An Agent update
     also cycles the Gateway that executes them
     (``_ensure_gateway_restart_for_agent_update``), which ends them, so for
-    ``target == 'agent'`` they block like any other run, as every active run
-    did before #7293. A WebUI-only update keeps the #7293 exemption.
-
-    The two lists are read in separate passes, so a run whose durable handoff
-    lands between them appears in both. The union is deduplicated by stream id
-    before counting and truncating, so one run is never counted twice.
+    ``target == 'agent'`` every live run blocks, as every active run did
+    before #7293. That is one pass over the registries with no durability
+    check (``run_drain.all_active_runs``), so no run can be counted twice or
+    missed while its durable mark changes. A WebUI-only update keeps the
+    #7293 exemption.
     """
     if target != 'agent':
         return _restart_blocker_snapshot()
     from api import run_drain
 
-    union: dict[str, dict] = {}
-    for row in run_drain.webui_owned_active_runs() + run_drain.resumable_gateway_active_runs():
-        sid = str(row.get('stream_id'))
-        if sid in union:
-            union[sid] = {**union[sid], 'registered_stream': bool(
-                union[sid].get('registered_stream') or row.get('registered_stream'))}
-        else:
-            union[sid] = row
-    return _blocker_snapshot_from_runs(list(union.values()))
+    return _blocker_snapshot_from_runs(run_drain.all_active_runs())
 
 
 def _restart_blocked_response(target: str, blocker_snapshot: dict | int) -> dict:
