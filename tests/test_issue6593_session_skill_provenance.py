@@ -413,6 +413,11 @@ def test_clear_resets_skill_usage_without_recovery_resurrection(isolated_session
     session.active_stream_id = "issue6593-old-run"
     old_clear_generation = session.clear_generation
     session.save(touch_updated_at=False, skip_index=True)
+    # As in production, the object get_session returns is the cached one: the
+    # clear handler re-resolves the session under its lock (SESSIONS, then disk)
+    # before mutating it.
+    with models.LOCK:
+        models.SESSIONS[session.session_id] = session
     body = {"session_id": session.session_id}
     monkeypatch.setattr(routes, "_check_csrf", lambda _handler: True)
     monkeypatch.setattr(routes, "read_body", lambda _handler: body)
