@@ -30,7 +30,6 @@ fingerprinted URL keeps the exact same ``immutable`` header as before.
 """
 
 import os
-from types import SimpleNamespace
 from urllib.parse import urlparse
 
 import pytest
