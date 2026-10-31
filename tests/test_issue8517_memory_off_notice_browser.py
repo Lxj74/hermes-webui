@@ -376,3 +376,39 @@ def test_notice_appearing_respects_auto_scroll_follow_off(page, server):
     page.evaluate(_SHOW_NOTICE)
     page.wait_for_timeout(100)
     assert page.evaluate("()=>$('messages').scrollTop") == before
+
+
+# ── Codex UX-delta r3: collapsing the notice under a flyout must not yank a reader who scrolled away ──
+
+_FLYOUT_SYNC = {"approvalCard": "_syncApprovalTranscriptSpace", "clarifyCard": "_syncClarifyTranscriptSpace"}
+
+
+def _open_flyout(page, card):
+    page.evaluate("([id,fn])=>{const c=$(id);c.classList.add('visible');window[fn](c);}", [card, _FLYOUT_SYNC[card]])
+    page.wait_for_timeout(150)  # the helpers re-snap in requestAnimationFrame
+
+
+@pytest.mark.parametrize("card", sorted(_FLYOUT_SYNC))
+def test_opening_a_flyout_over_the_notice_keeps_a_scrolled_away_reader_in_place(page, server, card):
+    _load_long_and_pin(page, server)
+    page.evaluate(_SHOW_NOTICE)
+    page.wait_for_timeout(100)
+    # A genuine user scroll-away ~180 px above the tail; the notice's collapse would bring it under 150 px.
+    page.evaluate("""()=>{_scrollPinned=false;_messageUserUnpinned=true;
+      const el=$('messages');el.scrollTop=el.scrollHeight-el.clientHeight-180;}""")
+    page.wait_for_timeout(100)
+    before = page.evaluate("()=>$('messages').scrollTop")
+    _open_flyout(page, card)
+    assert page.evaluate("()=>getComputedStyle($('memoryOffNotice')).display") == "none"
+    assert page.evaluate("()=>$('messages').scrollTop") == before
+    assert page.evaluate("()=>_messageUserUnpinned") is True
+
+
+@pytest.mark.parametrize("card", sorted(_FLYOUT_SYNC))
+def test_opening_a_flyout_over_the_notice_still_keeps_a_pinned_reader_at_the_tail(page, server, card):
+    _load_long_and_pin(page, server)
+    page.evaluate(_SHOW_NOTICE)
+    page.wait_for_timeout(100)
+    assert page.evaluate(_BOTTOM) <= 1
+    _open_flyout(page, card)
+    assert page.evaluate(_BOTTOM) <= 1

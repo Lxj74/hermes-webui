@@ -8682,7 +8682,9 @@ function _syncApprovalTranscriptSpace(card, opts) {
   opts = opts || {};
   const messages = $("messages");
   if (!messages) return;
-  const wasNearBottom = _approvalMessagesNearBottom(messages);
+  // Never yank a reader who scrolled away (sticky-unpin model): a viewport change as the card
+  // opens (e.g. the memory-off notice collapsing) can bring them under the near-bottom threshold.
+  const wasNearBottom = !(typeof _messageUserUnpinned !== 'undefined' && _messageUserUnpinned) && _approvalMessagesNearBottom(messages);
   if (!card || !card.classList.contains("visible")) {
     messages.classList.remove("approval-open");
     messages.classList.remove("approval-collapsed");
@@ -9808,7 +9810,9 @@ function _syncClarifyTranscriptSpace(card, opts) {
   opts = opts || {};
   const messages = $("messages");
   if (!messages) return;
-  const wasNearBottom = _clarifyMessagesNearBottom(messages);
+  // Never yank a reader who scrolled away (sticky-unpin model): a viewport change as the card
+  // opens (e.g. the memory-off notice collapsing) can bring them under the near-bottom threshold.
+  const wasNearBottom = !(typeof _messageUserUnpinned !== 'undefined' && _messageUserUnpinned) && _clarifyMessagesNearBottom(messages);
   if (!card || !card.classList.contains("visible")) {
     messages.classList.remove("clarify-open");
     messages.classList.remove("clarify-collapsed");
