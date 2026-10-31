@@ -75,6 +75,8 @@
 
 ### Fixed
 
+- Tests no longer leak provider state into the shared test environment: two onboarding tests applied a real setup on the test server, and the provider-key tests left API keys exported. With the real Agent installed, a local full-suite run failed `test_quiet_delegation_re_g2` and `test_ttl_cache` because of it. Tests only. (#8678, fixes #8677)
+
 - **During an in-place update, static files are no longer cached for a year under the old version's URL.** The update swaps the checkout before the old process restarts, so for that window the old process served next-revision files under its own `?v=` version and marked them `immutable` for a year, which could leave a browser with a mixed front-end (for example a new control without its CSS). While an update or restart is in progress, static files now get the normal 5-minute cache, and the year-long cache returns if the update fails. Thanks @happy5318. (#8670, refs #6992)
 
 - **Internal (test reliability): the gateway routing footer test runs its node harness from a file.** It passed its whole script (about 128 KB, mostly the real `renderMessages()`) to node as one command-line argument, only about 2.5 KB under Linux's 128 KiB per-argument limit, so a routine change to `renderMessages()` would have made the file fail with "Argument list too long" instead of testing anything. The script now goes through a temporary file; the same code runs and no assertion changed. Thanks @happy5318. (#8659)
