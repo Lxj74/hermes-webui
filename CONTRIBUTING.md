@@ -217,6 +217,9 @@ Want the smoothest review?
 - Avoid unnecessary rewrites
 - Add short comments only where the code would otherwise be hard to follow
 - Respond directly to review feedback and update the PR description if the scope changes
+- No need to keep an open PR up to date with master. Merge or rebase onto master only when GitHub
+  shows a conflict or a reviewer asks: maintainers rebase every PR onto current master before it
+  ships, and each push re-runs the full CI matrix (about 35 jobs) in a queue that every open PR shares.
 
 ## Development References
 
