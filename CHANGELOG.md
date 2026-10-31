@@ -73,6 +73,8 @@
 
 ### Fixed
 
+- **CI cancels a pull request's run for a superseded head.** A new push to an open pull request now cancels that workflow's run for the previous head, queued or running, so a wave of refreshed pull requests no longer keeps every older head's runs in the queue ahead of later work. Pushes to master, tag pushes, manual dispatches and re-runs are never cancelled. CONTRIBUTING notes that open pull requests don't need to be kept up to date with master. (#8657, closes #8656)
+
 - **Docker: a mounted Agent checkout that will never re-launch itself runs in place again.** Since v0.52.560 single-container setups with a mounted Agent git checkout could run the `.git`-less staged copy even when the Agent never relaunches, so in-app updates and live edits of that checkout did nothing (#8593). The container now decides only from inputs a later profile cannot change: the Agent's install stamp (read where the Agent reads it, and only an exact self-updating stamp gets the stage) and whether a stampless checkout is writable. A read-only checkout keeps the mount; a writable stampless one still gets the stage, as on v0.52.571. A profile loaded later can no longer move `HERMES_INSTALL_ROOT` after that decision. (#8594)
 
 - **Every assistant message in a routed turn shows the model that produced it.** Gateway routing metadata was stamped only on the turn's last answer, so interim answers before tool calls had no model label (one real session showed 25 of 32 answers unlabelled). Each assistant message now carries its turn's routing, and the footer lookup is scoped to the message's own foot, so the final answer keeps its "Done in" and usage footer. Thanks @solarmaster961. (#8287)
