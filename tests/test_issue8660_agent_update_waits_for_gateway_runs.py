@@ -163,16 +163,44 @@ def test_no_runs_means_no_agent_update_blocker(upd):
     assert snap["active_runs"] == 0
 
 
-def test_agent_snapshot_adds_resumable_runs_to_the_webui_snapshot(upd, monkeypatch):
-    """The merge keeps the WebUI-owned counts and ids and appends the resumable Gateway runs."""
-    monkeypatch.setattr(upd, "_restart_blocker_snapshot", lambda: {
-        "active_streams": 1, "active_runs": 1, "blocking_stream_ids": ["legacy-1"],
-        "blocking_run_ids": ["legacy-1"], "restart_blocked": True,
-    })
-    _add_run("gw-1", backend="gateway", durable_gateway=True, stream=True)
+def _handoff_lands_between_reads(monkeypatch, stream_id):
+    """Mark ``stream_id`` durable right after the WebUI-owned read, before the resumable read."""
+    real = run_drain.webui_owned_active_runs
+
+    def owned_then_handoff():
+        rows = real()
+        gateway_chat._mark_gateway_run_durable(stream_id)
+        return rows
+
+    monkeypatch.setattr(run_drain, "webui_owned_active_runs", owned_then_handoff)
+
+
+def test_a_handoff_between_the_two_reads_counts_the_run_once(upd, monkeypatch):
+    """Both gates reproduced one live run counted twice when its durable mark landed between the reads."""
+    _add_run("gw-handoff", backend="gateway", stream=True)  # not durable yet: WebUI-owned
+    _handoff_lands_between_reads(monkeypatch, "gw-handoff")
     snap = upd._update_blocker_snapshot("agent")
-    assert snap["active_streams"] == 2 and snap["active_runs"] == 2
-    assert snap["blocking_run_ids"] == ["legacy-1", "gw-1"]
+    assert gateway_chat.gateway_run_durably_resumable("gw-handoff") is True
+    assert snap["active_runs"] == 1
+    assert snap["active_streams"] == 1
+    assert snap["blocking_run_ids"] == ["gw-handoff"]
+    assert snap["blocking_stream_ids"] == ["gw-handoff"]
     assert snap["restart_blocked"] is True
-    # The WebUI target sees the WebUI snapshot unchanged.
-    assert upd._update_blocker_snapshot("webui")["active_runs"] == 1
+
+
+def test_the_union_is_deduplicated_before_counting_and_truncating(upd, monkeypatch):
+    for i in range(11):
+        _add_run(f"legacy-{i:02d}", stream=True)
+    _add_run("gw-handoff", backend="gateway", stream=True)
+    _handoff_lands_between_reads(monkeypatch, "gw-handoff")
+    snap = upd._update_blocker_snapshot("agent")
+    assert snap["active_runs"] == 12
+    assert len(snap["blocking_run_ids"]) == 10
+    assert len(set(snap["blocking_run_ids"])) == 10
+
+
+def test_webui_target_snapshot_is_the_restart_snapshot(upd):
+    _add_run("legacy-1", stream=True)
+    _add_run("gw-1", backend="gateway", durable_gateway=True, stream=True)
+    assert upd._update_blocker_snapshot("webui") == upd._restart_blocker_snapshot()
+    assert upd._update_blocker_snapshot("webui")["blocking_run_ids"] == ["legacy-1"]

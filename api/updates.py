@@ -174,6 +174,18 @@ def _apply_fetch_failure_message(fetch_out: str, network_message: str) -> str:
     return f'fetch failed: {detail}'
 
 
+def _blocker_snapshot_from_runs(runs: list[dict]) -> dict:
+    stream_ids = [r['stream_id'] for r in runs if r.get('registered_stream')]
+    run_ids = [r['stream_id'] for r in runs]
+    return {
+        'active_streams': len(stream_ids),
+        'active_runs': len(run_ids),
+        'blocking_stream_ids': stream_ids[:10],
+        'blocking_run_ids': run_ids[:10],
+        'restart_blocked': bool(run_ids),
+    }
+
+
 def _restart_blocker_snapshot() -> dict:
     """Return the WebUI-owned chat work that should block a self-restart.
 
@@ -185,16 +197,7 @@ def _restart_blocker_snapshot() -> dict:
     """
     from api import run_drain
 
-    runs = run_drain.webui_owned_active_runs()
-    stream_ids = [r['stream_id'] for r in runs if r.get('registered_stream')]
-    run_ids = [r['stream_id'] for r in runs]
-    return {
-        'active_streams': len(stream_ids),
-        'active_runs': len(run_ids),
-        'blocking_stream_ids': stream_ids[:10],
-        'blocking_run_ids': run_ids[:10],
-        'restart_blocked': bool(run_ids),
-    }
+    return _blocker_snapshot_from_runs(run_drain.webui_owned_active_runs())
 
 
 def _active_stream_count() -> int:
@@ -215,24 +218,24 @@ def _update_blocker_snapshot(target: str) -> dict:
     (``_ensure_gateway_restart_for_agent_update``), which ends them, so for
     ``target == 'agent'`` they block like any other run, as every active run
     did before #7293. A WebUI-only update keeps the #7293 exemption.
+
+    The two lists are read in separate passes, so a run whose durable handoff
+    lands between them appears in both. The union is deduplicated by stream id
+    before counting and truncating, so one run is never counted twice.
     """
-    snapshot = _restart_blocker_snapshot()
     if target != 'agent':
-        return snapshot
+        return _restart_blocker_snapshot()
     from api import run_drain
 
-    extra = run_drain.resumable_gateway_active_runs()
-    if not extra:
-        return snapshot
-    merged = dict(snapshot)
-    extra_streams = [r['stream_id'] for r in extra if r.get('registered_stream')]
-    extra_runs = [r['stream_id'] for r in extra]
-    merged['active_streams'] = int(snapshot.get('active_streams') or 0) + len(extra_streams)
-    merged['active_runs'] = int(snapshot.get('active_runs') or 0) + len(extra_runs)
-    merged['blocking_stream_ids'] = (list(snapshot.get('blocking_stream_ids') or []) + extra_streams)[:10]
-    merged['blocking_run_ids'] = (list(snapshot.get('blocking_run_ids') or []) + extra_runs)[:10]
-    merged['restart_blocked'] = True
-    return merged
+    union: dict[str, dict] = {}
+    for row in run_drain.webui_owned_active_runs() + run_drain.resumable_gateway_active_runs():
+        sid = str(row.get('stream_id'))
+        if sid in union:
+            union[sid] = {**union[sid], 'registered_stream': bool(
+                union[sid].get('registered_stream') or row.get('registered_stream'))}
+        else:
+            union[sid] = row
+    return _blocker_snapshot_from_runs(list(union.values()))
 
 
 def _restart_blocked_response(target: str, blocker_snapshot: dict | int) -> dict:
